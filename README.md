@@ -5,7 +5,7 @@
 A safe, dynamic tracing tool for the Java platform
 
 ## Version
-2.2.4
+2.3.0-SNAPSHOT
 
 ## Quick Summary
 BTrace is a safe, dynamic tracing tool for the Java platform.
@@ -38,6 +38,12 @@ cd <btrace>
 The binary dist packages can be found in `<btrace>/btrace-dist/build/distributions` as the *.tar.gz, *.zip, *.rpm and *.deb files.
 The exploded binary folder which can be used right away is located at `<btrace>/btrace-dist/build/resources/main` which serves as the __BTRACE_HOME__ location.
 
+##### Golden Files
+Some of the instrumentor related tests are using golden files. Therefore, it is necessary to update those files
+when the injected code is changed. This can be done with the help of passing in `updateTestData` Gradle property.
+Eg. running the tests like `./gradlew test -PupdateTestData` will regenerate all golden files which then must be
+checked in to the Git repository.
+
 
 ## Using BTrace
 ### Installation
@@ -62,21 +68,3 @@ The [maven plugin](https://github.com/btraceio/btrace-maven) is providing easy c
 ## Contributing - !!! Important !!!
 
 Pull requests can be accepted only from the signers of [Oracle Contributor Agreement](https://oca.opensource.oracle.com/)
-
-### Deb Repository
-
-Using the command line, add the following to your /etc/apt/sources.list system config file:
-
-```
-echo "deb http://dl.bintray.com/btraceio/deb xenial universe" | sudo tee -a /etc/apt/sources.list
-```
-
-Or, add the repository URLs using the "Software Sources" admin UI:
-
-```
-deb http://dl.bintray.com/btraceio/deb xenial universe
-```
-
-### RPM Repository
-
-Grab the _*.repo_ file `wget https://bintray.com/btraceio/rpm/rpm -O bintray-btraceio-rpm.repo` and use it.
