@@ -26,6 +26,7 @@
 package tests;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,9 +37,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import jdk.jfr.EventType;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordingFile;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A set of end-to-end functional tests.
@@ -50,8 +55,8 @@ import org.junit.jupiter.api.Test;
  */
 public class BTraceFunctionalTests extends RuntimeTest {
   @BeforeAll
-  public static void classSetup() throws Exception {
-    setup();
+  public static void setup() throws Exception {
+    classSetup();
   }
 
   @BeforeEach
@@ -63,7 +68,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
   @Test
   public void testOSMBean() throws Exception {
     isUnsafe = true;
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OSMBeanTest.java",
         2,
@@ -79,7 +84,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
   @Test
   public void testOnProbe() throws Exception {
     if (Files.exists(Paths.get(javaHome, "jre"))) {
-      test(
+      testDynamic(
           "resources.Main",
           "btrace/OnProbeTest.java",
           5,
@@ -99,7 +104,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testOnTimer() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnTimerTest.java",
         10,
@@ -117,7 +122,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testOnTimerArg() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnTimerArgTest.java",
         new String[] {"timer=500"},
@@ -137,7 +142,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
   @Test
   public void testOnExit() throws Exception {
     timeout = 3500;
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnExitTest.java",
         5,
@@ -150,10 +155,10 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testOnMethod() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnMethodTest.java",
-        10,
+        14,
         new ResultValidator() {
           @Override
           public void validate(String stdout, String stderr, int retcode, String jfrFile) {
@@ -164,13 +169,52 @@ public class BTraceFunctionalTests extends RuntimeTest {
             assertTrue(stdout.contains("{xxx}"));
             assertTrue(stdout.contains("heap:init"));
             assertTrue(stdout.contains("prop: test"));
+            assertTrue(stdout.contains("fieldSet: field java.lang.String resources.Main#field"));
+            assertTrue(stdout.contains("fieldSet: static field java.lang.String resources.Main#sField"));
+            assertTrue(stdout.contains("fieldGet: field java.lang.String resources.Main#field"));
+            assertTrue(stdout.contains("fieldGet: static field java.lang.String resources.Main#sField"));
+          }
+        });
+  }
+
+  @Test
+  public void testTraceAll() throws Exception {
+      String testJavaHome = System.getenv().get("TEST_JAVA_HOME");
+      if (testJavaHome == null) {
+          testJavaHome = System.getenv("JAVA_HOME");
+          if (testJavaHome == null) {
+              testJavaHome = System.getProperty("java.home");
+          }
+      }
+
+      assumeFalse(testJavaHome == null);
+
+      Properties releaseProps = new Properties();
+      releaseProps.load(
+              Files.newInputStream(new File(testJavaHome + File.separator + "release").toPath()));
+      String rtVersion = releaseProps.getProperty("JAVA_VERSION").replace("\"", "");
+      if (!isVersionSafeForTraceAll(rtVersion)) {
+          System.err.println("Skipping test for JDK " + rtVersion);
+          return;
+      }
+      testStartup(
+        "resources.Main",
+        "traces/TraceAllTest.class",
+        null,
+        10,
+        new ResultValidator() {
+          @Override
+          public void validate(String stdout, String stderr, int retcode, String jfrFile) {
+            assertFalse(stdout.contains("FAILED"), "Script should not have failed");
+            assertTrue(stderr.isEmpty(), "Non-empty stderr");
+            assertTrue(stdout.contains("[invocations="));
           }
         });
   }
 
   @Test
   public void testOnMethodLevel() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnMethodLevelTest.java",
         new String[] {"level=200"},
@@ -190,7 +234,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
   @Test
   public void testOnMethodTrackRetransform() throws Exception {
     trackRetransforms = true;
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnMethodTest.java",
         2,
@@ -206,7 +250,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testOnMethodReturn() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnMethodReturnTest.java",
         5,
@@ -224,7 +268,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testOnMethodSubclass() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/OnMethodSubclassTest.java",
         5,
@@ -241,7 +285,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
   @Test
   public void testProbeArgs() throws Exception {
     isUnsafe = true;
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/ProbeArgsTest.java",
         new String[] {"arg1", "arg2=val2"},
@@ -261,7 +305,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testPerfCounter() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/PerfCounterTest.java",
         5,
@@ -277,7 +321,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
 
   @Test
   public void testReflection() throws Exception {
-    test(
+    testDynamic(
         "resources.Main",
         "btrace/issues/BTRACE400.java",
         5,
@@ -302,7 +346,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
           Files.newInputStream(new File(testJavaHome + File.separator + "release").toPath()));
       rtVersion = releaseProps.getProperty("JAVA_VERSION").replace("\"", "");
     }
-    if (!isVersionSafe(rtVersion)) {
+    if (!isVersionSafeForJfr(rtVersion)) {
       // skip the test for 8.0.* because of missing support
       // skip all non-LTS versions (except the last one)
       // skip the test for JDK 11 since the latest version 11.0.9 and newer ends in SISGSEGV
@@ -312,7 +356,7 @@ public class BTraceFunctionalTests extends RuntimeTest {
     testWithJfr(
         "resources.Main",
         "btrace/JfrTest.java",
-        10,
+        30,
         new ResultValidator() {
           @Override
           public void validate(String stdout, String stderr, int retcode, String jfrFile) {
@@ -455,7 +499,41 @@ public class BTraceFunctionalTests extends RuntimeTest {
         });
   }
 
-  private static boolean isVersionSafe(String rtVersion) {
+    @ParameterizedTest(name = "testThreadStart: dynamic={0}")
+    @ValueSource(booleans = {true, false})
+    public void testThreadStart(boolean dynamic) throws Exception {
+        if (dynamic) {
+            testDynamic(
+                    "resources.ThreadSpawner",
+                    "traces/ThreadStart.class",
+                    null,
+                    10,
+                    new ResultValidator() {
+                        @Override
+                        public void validate(String stdout, String stderr, int retcode, String jfrFile) {
+                            assertFalse(stdout.contains("FAILED"), "Script should not have failed");
+                            assertTrue(stderr.isEmpty(), "Non-empty stderr");
+                            assertTrue(stdout.contains("starting testThread"));
+                        }
+                    });
+        } else {
+            testStartup(
+                    "resources.ThreadSpawner",
+                    "traces/ThreadStart.class",
+                    null,
+                    10,
+                    new ResultValidator() {
+                        @Override
+                        public void validate(String stdout, String stderr, int retcode, String jfrFile) {
+                            assertFalse(stdout.contains("FAILED"), "Script should not have failed");
+                            assertTrue(stderr.isEmpty(), "Non-empty stderr");
+                            assertTrue(stdout.contains("starting testThread"));
+                        }
+                    });
+        }
+    }
+
+  private static boolean isVersionSafeForJfr(String rtVersion) {
       System.out.println("===> version: " + rtVersion);
     String[] versionParts = rtVersion.split("\\+")[0].split("\\.");
     int major = Integer.parseInt(versionParts[0]);
@@ -478,4 +556,21 @@ public class BTraceFunctionalTests extends RuntimeTest {
     }
     return false;
   }
+
+    private static boolean isVersionSafeForTraceAll(String rtVersion) {
+        System.out.println("===> version: " + rtVersion);
+        String[] versionParts = rtVersion.split("\\+")[0].split("\\.");
+        int major = Integer.parseInt(versionParts[0]);
+        String updateStr = versionParts.length == 3 ? versionParts[2].replace("0_", "") : "0";
+        int idx = updateStr.indexOf('-');
+        if (idx > -1) {
+            updateStr = updateStr.substring(0, idx);
+        }
+        int update = Integer.parseInt(updateStr);
+        // currently, an attempt to instrument all classes and methods will result in crash in jplis agent for JDK 17
+        if (major == 17) {
+            return false;
+        }
+        return true;
+    }
 }
