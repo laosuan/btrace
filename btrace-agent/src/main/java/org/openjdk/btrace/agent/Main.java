@@ -24,7 +24,6 @@
  */
 package org.openjdk.btrace.agent;
 
-import static org.openjdk.btrace.core.Args.ALLOWED_CALLS;
 import static org.openjdk.btrace.core.Args.BOOT_CLASS_PATH;
 import static org.openjdk.btrace.core.Args.CMD_QUEUE_LIMIT;
 import static org.openjdk.btrace.core.Args.CONFIG;
@@ -143,44 +142,56 @@ public final class Main {
       settings.setDebug(isDebug);
       DebugSupport.initLoggers(isDebug, log);
 
-      log.debug("parsed command line arguments");
       parseArgs();
       // settings are all built-up; set the logging system properties accordingly
       DebugSupport.initLoggers(settings.isDebug(), log);
 
-      log.debug("Adding class transformer");
-      inst.addTransformer(transformer, true);
-      int startedScripts = startScripts();
-
       String tmp = argMap.get(NO_SERVER);
       // noServer is defaulting to true if startup scripts are defined
       boolean noServer = tmp != null ? Boolean.parseBoolean(tmp) : hasScripts();
+      Thread agentThread = null;
       if (noServer) {
         log.debug("noServer is true, server not started");
-        return;
+      } else {
+        agentThread =
+            new Thread(
+                () -> {
+                  BTraceRuntime.enter();
+                  try {
+                    startServer();
+                  } finally {
+                    BTraceRuntime.leave();
+                  }
+                });
       }
-      Thread agentThread =
-          new Thread(
-              () -> {
-                BTraceRuntime.enter();
-                try {
-                  startServer();
-                } finally {
-                  BTraceRuntime.leave();
-                }
-              });
+      // set the fall-back instrumentation object to BTraceRuntime
+      BTraceRuntime.instrumentation = inst;
       // force back-registration of BTraceRuntimeImpl in BTraceRuntime
       BTraceRuntimes.getDefault();
       // init BTraceRuntime
       BTraceRuntime.initUnsafe();
-      BTraceRuntime.enter();
-      try {
-        agentThread.setDaemon(true);
-        log.debug("starting agent thread");
-        agentThread.start();
-      } finally {
-        BTraceRuntime.leave();
+      if (agentThread != null) {
+        BTraceRuntime.enter();
+        try {
+          agentThread.setDaemon(true);
+          log.debug("starting agent thread");
+
+          agentThread.start();
+        } finally {
+          BTraceRuntime.leave();
+        }
       }
+
+      log.debug("Adding class transformer");
+      inst.addTransformer(transformer, true);
+      try {
+        // the MethodHandleNatives must be instrumented to track start-end of indy linking to avoid deadlocking
+        Class<?> clz = ClassLoader.getSystemClassLoader().loadClass("java.lang.invoke.MethodHandleNatives");
+        inst.retransformClasses(clz);
+      } catch (Throwable t) {
+        log.debug("Failed to instrument MethodHandleNatives", t);
+      }
+      int startedScripts = startScripts();
     } finally {
       log.debug("Agent init took: {}", (System.nanoTime() - ts) + "ns");
     }
@@ -254,29 +265,6 @@ public final class Main {
                   }
 
                   argMap.put(argKey, scriptVal);
-                  break;
-                }
-              case ALLOWED_CALLS:
-                {
-                  if (Boolean.parseBoolean(argMap.get(argKey))) {
-                    // merge allowed calls from command line and agent.properties
-                    String oldVal = argMap.get(argKey);
-                    String newVal = oldVal + "|" + argVal;
-                    logMsg
-                        .append("merging default agent argument '")
-                        .append(argKey)
-                        .append("':'")
-                        .append(oldVal)
-                        .append("' with '")
-                        .append(argVal)
-                        .append("'");
-                    argMap.put(argKey, newVal);
-                  } else {
-                    logMsg
-                        .append("argument '")
-                        .append(argKey)
-                        .append("' is applicable only in sandboxed mode");
-                  }
                   break;
                 }
               case SYSTEM_CLASS_PATH: // fall through
@@ -398,8 +386,8 @@ public final class Main {
 
     String libs = argMap.get(LIBS);
     String config = argMap.get(CONFIG);
-    loadDefaultArguments(config);
     processClasspaths(libs);
+    loadDefaultArguments(config);
 
     p = argMap.get(DEBUG);
     settings.setDebug(p != null && !"false".equals(p));
@@ -789,9 +777,9 @@ public final class Main {
       } else {
         String traceOutput = clientSettings.getOutputFile();
         String outDir = clientSettings.getScriptOutputDir();
-        if (traceOutput == null || traceOutput.length() == 0) {
+        if (traceOutput == null || traceOutput.isEmpty()) {
           clientSettings.setOutputFile("${client}-${agent}.${ts}.btrace[default]");
-          if (outDir == null || outDir.length() == 0) {
+          if (outDir == null || outDir.isEmpty()) {
             clientSettings.setScriptOutputDir(scriptParent);
           }
         }
@@ -836,7 +824,7 @@ public final class Main {
       System.setProperty("btrace.wireio", String.valueOf(WireIO.VERSION));
 
       String scriptOutputFile = settings.getOutputFile();
-      if (scriptOutputFile != null && scriptOutputFile.length() > 0) {
+      if (scriptOutputFile != null && !scriptOutputFile.isEmpty()) {
         System.setProperty("btrace.output", scriptOutputFile);
       }
       ss = new ServerSocket(port);
@@ -854,7 +842,7 @@ public final class Main {
           log.debug("client accepted {}", sock);
         }
         ClientContext ctx = new ClientContext(inst, transformer, argMap, settings);
-        Client client = RemoteClient.getClient(ctx, sock, value -> handleNewClient(value));
+        Client client = RemoteClient.getClient(ctx, sock, Main::handleNewClient);
       } catch (RuntimeException | IOException re) {
         if (log.isDebugEnabled()) {
           log.debug("BTrace server failed", re);
